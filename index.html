@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI 视频智能切片工具</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        .gradient-bg { background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%); }
+        .video-card:hover { transform: translateY(-4px); transition: all 0.3s ease; }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+
+    <nav class="gradient-bg text-white p-4 shadow-md">
+        <div class="container mx-auto flex justify-between items-center">
+            <h1 class="text-xl font-bold flex items-center">
+                <i class="fas fa-film mr-2"></i> AI 营销视频拆条工具
+            </h1>
+            <div class="text-sm bg-white/20 px-3 py-1 rounded-full">Demo v1.0</div>
+        </div>
+    </nav>
+
+    <div class="container mx-auto py-10 px-4 max-w-6xl">
+        <div class="bg-white rounded-2xl shadow-sm p-10 mb-10 border-2 border-dashed border-indigo-200 hover:border-indigo-400 transition-all text-center">
+            <input type="file" id="fileInput" class="hidden" multiple accept="video/*">
+            <div class="cursor-pointer" onclick="document.getElementById('fileInput').click()">
+                <div class="bg-indigo-50 w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-4">
+                    <i class="fas fa-cloud-upload-alt text-3xl text-indigo-600"></i>
+                </div>
+                <h2 class="text-2xl font-semibold text-gray-800">上传你的推广视频</h2>
+                <p class="text-gray-500 mt-2">支持拖拽或点击上传，可一次性选择多个视频</p>
+                <button class="mt-6 bg-indigo-600 text-white px-8 py-3 rounded-xl hover:bg-indigo-700 shadow-lg shadow-indigo-200 transition font-medium">
+                    立即选择文件
+                </button>
+            </div>
+        </div>
+
+        <div id="taskList" class="space-y-4 mb-10">
+            </div>
+
+        <div id="resultsArea" class="hidden">
+            <div class="flex flex-col md:flex-row justify-between items-end md:items-center mb-8 gap-4 border-b pb-6">
+                <div>
+                    <h3 class="text-2xl font-bold text-gray-800">AI 分析结果</h3>
+                    <p class="text-gray-500 mt-1">已自动为您拆分出营销关键片段</p>
+                </div>
+                <button id="downloadAllBtn" class="bg-green-500 text-white px-6 py-3 rounded-xl hover:bg-green-600 transition flex items-center shadow-lg shadow-green-100">
+                    <i class="fas fa-file-archive mr-2"></i> 打包下载全部片段 (.zip)
+                </button>
+            </div>
+            
+            <div id="videoGrid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+                </div>
+        </div>
+    </div>
+
+    <script>
+        const fileInput = document.getElementById('fileInput');
+        const taskList = document.getElementById('taskList');
+        const videoGrid = document.getElementById('videoGrid');
+        const resultsArea = document.getElementById('resultsArea');
+        const downloadAllBtn = document.getElementById('downloadAllBtn');
+
+        let allClipFilenames = []; // 用于存放所有生成的片段文件名
+
+        // 监听文件选择
+        fileInput.onchange = async (e) => {
+            const files = e.target.files;
+            if (files.length === 0) return;
+
+            resultsArea.classList.remove('hidden');
+
+            // 循环处理选中的每一个视频
+            for (let file of files) {
+                await processVideo(file);
+            }
+        };
+
+        async function processVideo(file) {
+            // 1. 创建进度条 UI
+            const taskId = 'task-' + Math.random().toString(36).substr(2, 9);
+            const taskHtml = `
+                <div id="${taskId}" class="bg-white p-5 rounded-xl shadow-sm border-l-4 border-indigo-500 flex items-center justify-between">
+                    <div class="flex items-center space-x-4">
+                        <div class="animate-spin rounded-full h-5 w-5 border-2 border-indigo-500 border-t-transparent"></div>
+                        <div>
+                            <p class="font-bold text-gray-800">${file.name}</p>
+                            <p class="text-sm text-gray-500" id="${taskId}-status">正在解析视频内容...</p>
+                        </div>
+                    </div>
+                </div>
+            `;
+            taskList.insertAdjacentHTML('afterbegin', taskHtml);
+
+            // 2. 发送请求给后端
+            const formData = new FormData();
+            formData.append('file', file);
+
+            try {
+                const response = await fetch('http://127.0.0.1:8000/api/upload-and-analyze', {
+                    method: 'POST',
+                    body: formData
+                });
+                const data = await response.json();
+
+                if (data.status === 'success') {
+                    // 更新进度条状态为完成
+                    const taskEl = document.getElementById(taskId);
+                    taskEl.classList.replace('border-indigo-500', 'border-green-500');
+                    taskEl.querySelector('.animate-spin').remove();
+                    document.getElementById(`${taskId}-status`).innerHTML = '<span class="text-green-600">✅ 分析完成</span>';
+                    
+                    // 渲染切片卡片
+                    renderClips(data.ai_clips, file.name);
+                }
+            } catch (error) {
+                console.error('处理失败:', error);
+                document.getElementById(`${taskId}-status`).innerHTML = '<span class="text-red-500">❌ 处理出错，请检查后端服务</span>';
+            }
+        }
+
+        function renderClips(clips, originalName) {
+            clips.forEach(clip => {
+                allClipFilenames.push(clip.clip_filename); // 记录文件名用于打包
+                
+                const clipHtml = `
+                    <div class="bg-white rounded-2xl overflow-hidden shadow-sm hover:shadow-xl transition-all video-card border border-gray-100">
+                        <div class="relative group">
+                            <video class="w-full aspect-video bg-black object-cover" controls 
+                                   src="http://127.0.0.1:8000/api/download/single/${clip.clip_filename}"></video>
+                            <div class="absolute top-3 left-3 bg-indigo-600 text-white text-[10px] uppercase tracking-wider font-bold px-2 py-1 rounded-md shadow-lg">
+                                ${clip.category}
+                            </div>
+                        </div>
+                        <div class="p-5">
+                            <h4 class="font-bold text-gray-800 line-clamp-1">${clip.category}</h4>
+                            <p class="text-xs text-gray-400 mt-1 mb-4 italic">来自: ${originalName}</p>
+                            <div class="flex items-center justify-between text-sm text-gray-600 mb-4 bg-gray-50 p-2 rounded-lg">
+                                <span><i class="far fa-clock mr-1"></i> ${clip.start_sec}s</span>
+                                <span class="text-gray-300">|</span>
+                                <span>${clip.end_sec}s</span>
+                                <span class="text-gray-300">|</span>
+                                <span>时长: ${Math.round(clip.end_sec - clip.start_sec)}s</span>
+                            </div>
+                            <a href="http://127.0.0.1:8000/api/download/single/${clip.clip_filename}" 
+                               class="block w-full text-center bg-indigo-50 hover:bg-indigo-100 text-indigo-700 py-2.5 rounded-xl font-semibold transition">
+                                <i class="fas fa-download mr-2"></i> 下载此段
+                            </a>
+                        </div>
+                    </div>
+                `;
+                videoGrid.insertAdjacentHTML('beforeend', clipHtml);
+            });
+        }
+
+        // 打包下载逻辑
+        downloadAllBtn.onclick = async () => {
+            if (allClipFilenames.length === 0) return;
+            
+            downloadAllBtn.innerText = "正在打包...";
+            downloadAllBtn.disabled = true;
+
+            try {
+                const response = await fetch('http://127.0.0.1:8000/api/download/all', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(allClipFilenames)
+                });
+                const blob = await response.blob();
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `AI_Clips_${Date.now()}.zip`;
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+            } catch (e) {
+                alert("打包下载失败");
+            } finally {
+                downloadAllBtn.innerHTML = '<i class="fas fa-file-archive mr-2"></i> 打包下载全部片段 (.zip)';
+                downloadAllBtn.disabled = false;
+            }
+        };
+    </script>
+</body>
+</html>
